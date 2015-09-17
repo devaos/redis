@@ -469,9 +469,18 @@ void clusterInit(void) {
     /* The slots -> keys map is a sorted set. Init it. */
     server.cluster->slots_to_keys = zslCreate();
 
-    /* Set myself->port to my listening port, we'll just need to discover
-     * the IP address via MEET messages. */
-    myself->port = server.port;
+    /* Set the IP address and port to announce based on the configuration
+     * otherwise set myself->port to my listening port, we'll just need to
+     * discover the IP address via MEET messages. */
+    if (server.cluster_announceip) {
+        memcpy(myself->ip,server.cluster_announceip,strlen(server.cluster_announceip)+1);
+    }
+
+    if (server.cluster_announceport) {
+        myself->port = server.cluster_announceport;
+    } else {
+        myself->port = server.port;
+    }
 
     server.cluster->mf_end = 0;
     resetManualFailover();
@@ -1623,7 +1632,8 @@ int clusterProcessPacket(clusterLink *link) {
     if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_MEET) {
         serverLog(LL_DEBUG,"Ping packet received: %p", (void*)link->node);
 
-        /* We use incoming MEET messages in order to set the address
+        /* Unless an IP address to announce was hardcoded in the config we
+         * use incoming MEET messages in order to set the address
          * for 'myself', since only other cluster nodes will send us
          * MEET messagses on handshakes, when the cluster joins, or
          * later if we changed address, and those nodes will use our
@@ -1634,7 +1644,8 @@ int clusterProcessPacket(clusterLink *link) {
          * However if we don't have an address at all, we update the address
          * even with a normal PING packet. If it's wrong it will be fixed
          * by MEET later. */
-        if (type == CLUSTERMSG_TYPE_MEET || myself->ip[0] == '\0') {
+        if ((type == CLUSTERMSG_TYPE_MEET && !server.cluster_announceip) ||
+            myself->ip[0] == '\0') {
             char ip[NET_IP_STR_LEN];
 
             if (anetSockName(link->fd,ip,sizeof(ip),NULL) != -1 &&
